@@ -249,6 +249,7 @@ final class Pet {
     private var missingPerchTicks = 0
     private static let missingTicksBeforeFall = 20    // ≈ 0.7 s
     private static let crouchTicks = 5   // ~0.17 s
+    private static let iconBubbleGap: CGFloat = 56   // leave room for "сижу" before the app icon
 
     init() {
         let size = NSSize(width: 170, height: 90)   // wide enough for a speech bubble at the side
@@ -784,10 +785,21 @@ final class Pet {
         let margin = (window.frame.width - CGFloat(spriteColumns) * view.pixelSize) / 2
         let spriteLeft = window.frame.minX + margin
         let headTop = window.frame.minY + 2 + CGFloat(bodyRows.count + 2 + (view.nightcap ? nightcapRows.count : 0)) * view.pixelSize
-        var origin = NSPoint(x: spriteLeft - size.width / 2, y: headTop + 4)
-        if let screen = NSScreen.screens.first?.frame, origin.y + size.height > screen.maxY {
-            origin = NSPoint(x: spriteLeft - size.width - 6, y: headTop - size.height)
+        let screen = NSScreen.screens.first?.frame ?? .zero
+        var origin: NSPoint
+        if [.perched, .climbing].contains(view.mood) {
+            // Sitting on an app window (near the top of the screen): show it to the right, past the speech bubble.
+            let spriteRight = spriteLeft + CGFloat(spriteColumns) * view.pixelSize
+            let bubbleRoom: CGFloat = view.bubble == nil ? 6 : Pet.iconBubbleGap
+            origin = NSPoint(x: spriteRight + bubbleRoom,
+                             y: min(window.frame.minY + 2, screen.maxY - size.height))
+        } else {
+            origin = NSPoint(x: spriteLeft - size.width / 2, y: headTop + 4)
+            if origin.y + size.height > screen.maxY {
+                origin = NSPoint(x: spriteLeft - size.width - 6, y: headTop - size.height)
+            }
         }
+        origin.x = min(max(origin.x, screen.minX), screen.maxX - size.width)
         iconPopup.window.setFrameOrigin(origin)
     }
 
