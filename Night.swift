@@ -18,6 +18,13 @@ enum Night {
     }
 }
 
+/// macOS Dark Mode — the pet wears its nightcap while it's on.
+enum Appearance {
+    static var isDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+}
+
 /// Nightcap drawn above the head; the tip flops over to the side with a pom-pom.
 /// C = cap, W = white brim, P = pom-pom.
 let nightcapRows = [

@@ -17,6 +17,7 @@ let bodyRows = [
     ".XXXXXXXXX.",
 ]
 let blinkRow = ".XXXXXXXXX."
+let blinkGap = "..........."
 let legsStand = [".X.X...X.X.", ".X.X...X.X."]
 let legsStepA = [".X.X...X.X.", "X...X.X...X"]
 let legsStepB = ["..X.X.X.X..", "..X.X.X.X.."]
@@ -43,6 +44,8 @@ final class PetView: NSView {
     /// Smaller pixels when sitting in a tight spot above a window.
     var pixelSize: CGFloat = pixel
     var nightcap = false   // dragged out of bed at night
+    /// How many pixel rows above the head the cap still is while it drops on (0 = on the head).
+    var capDrop = 0
     var happy = false      // being petted
 
     private static let palette: [Character: NSColor] = [
@@ -76,7 +79,10 @@ final class PetView: NSView {
         }
         rows += legs()
         if mood == .splat { rows = splatRows }
-        if nightcap {
+        if nightcap && capDrop > 0 {
+            // Cap falling onto the head: a gap of empty rows between cap and head, tip not flopped yet.
+            rows = nightcapRows + Array(repeating: blinkGap, count: capDrop) + rows
+        } else if nightcap {
             for tip in nightcapTip where tip.row < rows.count {
                 var chars = Array(rows[tip.row])
                 chars[tip.col] = tip.key
@@ -222,6 +228,11 @@ final class Pet {
     private var insideHouse = false
     private static let pulledOutAwakeSeconds: TimeInterval = 20
     private static let nightCheckTicks = 30
+    private var puttingOnCap = false
+    private var afterCap: (() -> Void)?
+    private var capSettledTick = 0
+    private static let capDropRows = 7      // starts this many pixel rows above the head
+    private static let capPauseTicks = 24   // ~0.8 s to "settle" in the cap before heading to bed
 
     // Petting (hover) and app-icon popups for new Dock badges.
     private var hovering = false
@@ -257,11 +268,20 @@ final class Pet {
         window.setFrameOrigin(homeOrigin())
         window.orderFrontRegardless()
         fallAsleep()
+        view.nightcap = Appearance.isDark
 
         view.onClick = { [weak self] in self?.jump() }
         view.onDrag = { [weak self] origin in self?.carry(to: origin) }
         view.onDrop = { [weak self] in self?.drop() }
         view.onHover = { [weak self] inside in self?.setHovering(inside) }
+
+        // Dark / Light Mode switches.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
+        ) { [weak self] _ in
+            // The app's appearance updates a moment after the notification.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.appearanceChanged() }
+        }
 
         badgeWatcher = BadgeWatcher { [weak self] app in self?.showNotification(from: app) }
         badgeWatcher?.start()
@@ -399,6 +419,7 @@ final class Pet {
         view.pixelSize += max(-Pet.sizeStepPerTick, min(Pet.sizeStepPerTick, sizeDelta))
 
         if tick % Pet.nightCheckTicks == 0 { checkNight() }
+        stepCapDrop()
         if tick % 15 == 0 { runDebugCommand() }
         stepPetting()
         if iconPopup.isShowing { placeIconPopup() }
@@ -577,6 +598,8 @@ final class Pet {
             if let app = NSRunningApplication.runningApplications(withBundleIdentifier: "ru.keepcoder.Telegram").first {
                 showNotification(from: app)
             }
+        case "dark": appearanceChanged(forcedDark: true)
+        case "light": appearanceChanged(forcedDark: false)
         case "pet": setHovering(true)
         case "unpet": setHovering(false)
         default: break
@@ -586,16 +609,81 @@ final class Pet {
     // MARK: Night
 
     private func checkNight() {
-        let night = Night.isNight()
-        view.nightcap = night && !insideHouse
-        if night {
-            // Bedtime: head home (or straight inside if already at the door).
-            if !insideHouse, view.mood == .sleeping, houseWindow.isOnActiveSpace {
-                abs(window.frame.origin.x - homeOrigin().x) < 3 ? enterHouse() : goHome()
-            }
-        } else if insideHouse {
-            leaveHouse()
+        guard Night.isNight() else {
+            if insideHouse { leaveHouse() }
+            return
         }
+        // Bedtime: once it's resting, it goes home and inside.
+        if !insideHouse, !puttingOnCap, view.mood == .sleeping { bedtime() }
+    }
+
+    // MARK: Dark Mode nightcap
+
+    private var wasDark = Appearance.isDark
+
+    /// Called when the system appearance changes: Dark → the cap drops on, Light → it comes off.
+    private func appearanceChanged(forcedDark: Bool? = nil) {
+        let dark = forcedDark ?? Appearance.isDark
+        guard dark != wasDark else { return }
+        wasDark = dark
+        petLog("appearance: \(dark ? "dark" : "light")")
+        if dark {
+            if insideHouse || !window.isVisible { view.nightcap = true; return }
+            if !view.nightcap, !puttingOnCap, [.sleeping, .idle, .walking, .perched].contains(view.mood) {
+                let previousMood = view.mood
+                putOnCap { [weak self] in self?.resume(previousMood) }
+            } else {
+                view.nightcap = true
+            }
+        } else {
+            view.nightcap = false
+            view.capDrop = 0
+            if window.isVisible, !insideHouse { view.bubble = "утро!" }
+        }
+    }
+
+    /// Back to what it was doing before the cap dropped on.
+    private func resume(_ mood: Mood) {
+        switch mood {
+        case .perched: view.mood = .perched
+        case .sleeping: fallAsleep()
+        default:
+            view.mood = .idle
+            moodTimeLeft = 1
+        }
+    }
+
+    private func putOnCap(then action: @escaping () -> Void) {
+        puttingOnCap = true
+        returningHome = false
+        if view.mood != .perched { view.mood = .idle }
+        moodTimeLeft = .infinity
+        view.bubble = nil
+        view.nightcap = true
+        view.capDrop = Pet.capDropRows
+        afterCap = action
+    }
+
+    private func stepCapDrop() {
+        guard puttingOnCap, tick % 2 == 0 else { return }
+        if view.capDrop > 0 {
+            view.capDrop -= 1
+            if view.capDrop == 0 {
+                capSettledTick = tick
+                view.bubble = "*зевает*"
+            }
+        } else if tick - capSettledTick > Pet.capPauseTicks {
+            puttingOnCap = false
+            view.bubble = nil
+            afterCap?()
+            afterCap = nil
+        }
+    }
+
+    /// Into the house if at the door, otherwise walk home first (only the main desktop has the house).
+    private func bedtime() {
+        guard houseWindow.isOnActiveSpace else { return fallAsleep() }
+        abs(window.frame.origin.x - homeOrigin().x) < 3 ? enterHouse() : goHome()
     }
 
     private func enterHouse() {
@@ -613,7 +701,7 @@ final class Pet {
     private func leaveHouse() {
         petLog("morning: coming out of the house")
         insideHouse = false
-        view.nightcap = false
+        view.nightcap = Appearance.isDark
         houseView?.lightsOn = true
         houseView?.showHeart = false
         window.setFrameOrigin(homeOrigin())
