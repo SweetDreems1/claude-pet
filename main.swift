@@ -516,7 +516,8 @@ final class Pet {
         guard let screenTop = NSScreen.screens.first?.frame.maxY else { return nil }
         let x = spot.point.x - window.frame.width / 2
         let feetY = spot.point.y - 2
-        let rows = CGFloat(bodyRows.count + 1)
+        // Body + one leg row, plus the nightcap when it's on — so the cap isn't cut off at the screen top.
+        let rows = CGFloat(bodyRows.count + 1 + (view.nightcap ? nightcapRows.count : 0))
         for size in Pet.perchPixelSizes where feetY + rows * size + 2 <= screenTop {
             return (NSPoint(x: x, y: feetY), size)
         }
