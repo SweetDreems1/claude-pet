@@ -486,8 +486,6 @@ final class Pet {
             if view.mood == .perched { fallDown() } else if awakeTimeLeft <= 0 { goHome() }
             return
         }
-        // Pulled out of bed at night: too sleepy to climb, keeps walking along the bottom.
-        if Night.isNight() { return petLog("space changed: night, staying at the bottom") }
         // Nothing to climb on (empty desktop, full-screen window…): stay where we are.
         guard let spot = WindowFinder.frontPerch(), let placement = perchPlacement(for: spot) else {
             petLog("space changed: nothing to climb on (front app: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"))")
