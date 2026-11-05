@@ -254,7 +254,7 @@ final class Pet {
     init() {
         let size = NSSize(width: 170, height: 90)   // wide enough for a speech bubble at the side
         window = makeOverlayWindow(size: size)
-        window.level = .statusBar   // can sit over the menu bar strip
+        window.level = .popUpMenu   // above the menu bar strip, and above the black strip full-screen apps put there
         view = PetView(frame: NSRect(origin: .zero, size: size))
         window.contentView = view
 

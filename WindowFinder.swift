@@ -10,7 +10,7 @@ struct PerchSpot {
 enum WindowFinder {
     /// Roughly the middle of the close / minimise / zoom buttons, measured from the window's left edge.
     static let buttonsCenterOffset: CGFloat = 36
-    static let minWindowSize = CGSize(width: 200, height: 200)   // skips thin helper strips (Chrome keeps a 124 px one under the menu bar)
+    static let minWindowSize = CGSize(width: 200, height: 120)
 
     /// The front normal window of the frontmost app on the main screen, or nil (desktop, our own app, etc).
     static func frontPerch() -> PerchSpot? {
