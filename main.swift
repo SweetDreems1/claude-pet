@@ -199,6 +199,8 @@ final class Pet {
     private let arcDuration: TimeInterval = 0.9
     private let arcHeight: CGFloat = 140
     private var perch: PerchSpot?
+    /// Where on the window's top edge it sits: above the buttons, or wherever it was dropped.
+    private var perchOffset = WindowFinder.buttonsCenterOffset
     private var perchedSince = 0
     private static let perchBubbleTicks = 60   // "тут" bubble shows ~2 s
     private static let lookAroundTicks = 75    // every ~2.5 s maybe turn the other way
@@ -493,6 +495,11 @@ final class Pet {
             return
         }
         petLog("space changed: climbing onto window \(spot.windowID) at \(spot.point)")
+        perchOffset = WindowFinder.buttonsCenterOffset
+        climb(onto: spot, placement)
+    }
+
+    private func climb(onto spot: PerchSpot, _ placement: (origin: NSPoint, pixelSize: CGFloat)) {
         perch = spot
         arcFrom = window.frame.origin
         arcTo = placement.origin
@@ -548,7 +555,7 @@ final class Pet {
         // Look around now and then so it doesn't just sit there like a statue.
         if tick % Pet.lookAroundTicks == 0, Bool.random() { view.facingLeft.toggle() }
 
-        guard let id = perch?.windowID, let spot = WindowFinder.perch(for: id),
+        guard let id = perch?.windowID, let spot = WindowFinder.perch(for: id, offset: perchOffset),
               let placement = perchPlacement(for: spot) else {
             // During a desktop switch the window briefly looks hidden — don't fall for that right away.
             missingPerchTicks += 1
@@ -822,7 +829,14 @@ final class Pet {
         window.setFrameOrigin(origin)
     }
 
+    /// Let go over a window → hops onto its top edge right there and stays until the desktop changes.
     private func drop() {
+        let feet = NSPoint(x: window.frame.midX, y: window.frame.minY + 2)
+        if let found = WindowFinder.spotUnder(x: feet.x, feetY: feet.y), let placement = perchPlacement(for: found.spot) {
+            petLog("dropped onto window \(found.spot.windowID)")
+            perchOffset = found.offset
+            return climb(onto: found.spot, placement)
+        }
         view.mood = .falling
         velocityX = 0
         velocityY = 0
